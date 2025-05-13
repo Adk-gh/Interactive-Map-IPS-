@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Indigenous Groups Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #map { height: 600px; width: 100%; border-radius: 0.5rem; }
+        .leaflet-control-layers { 
+            background: rgba(255, 255, 255, 0.9); 
+            padding: 1rem; 
+            border-radius: 0.5rem; 
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); 
+            animation: slideInLeft 0.5s ease-in-out;
+        }
+        .popup-card { 
+            background: #f9fafb; 
+            padding: 1rem; 
+            border-radius: 0.5rem; 
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); 
+            max-width: 250px; 
+            animation: fadeIn 0.5s ease-in, pulse 1s ease-in-out;
+        }
+        .popup-image { width: 100%; height: auto; margin-top: 0.5rem; border-radius: 0.25rem; }
+        .leaflet-tooltip { width: 200px; white-space: normal; }
+        .sidebar { 
+            transition: transform 0.3s ease-in-out, scale 0.3s ease-in-out; 
+            transform: translateX(100%) scale(0.95); 
+            position: fixed; 
+            right: 0; 
+            top: 0; 
+            height: 100%; 
+            width: 300px; 
+            background: #fff; 
+            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1); 
+            padding: 1rem; 
+            z-index: 1000; 
+            overflow-y: auto;
+        }
+        .sidebar.partial-closed {
+    transform: translateX(70%); /* Adjust % to control how much remains visible */
+}
+        .sidebar.open { 
+            transform: translateX(0) scale(1); 
+            animation: slideIn 0.5s ease-in-out;
+        }
+        .marker { transition: transform 0.3s; }
+        .marker:hover { 
+            transform: scale(1.2); 
+            box-shadow: 0 0 10px rgba(79, 70, 229, 0.8); /* Glow effect */
+        }
+        .marker.bounce {
+            animation: bounce 0.5s ease-in-out;
+        }
+        .theme-toggle, .search-bar { 
+            background: #fff; 
+            padding: 0.5rem; 
+            border-radius: 0.25rem; 
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); 
+        }
+        .theme-toggle label { 
+            color: #1f2937; /* Darker color for Map Theme label */
+        }
+        #sidebar-title { 
+            color: #1f2937; /* Darker color for sidebar titles */
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%) scale(0.95); }
+            to { transform: translateX(0) scale(1); }
+        }
+        @keyframes slideInLeft {
+            from { transform: translateX(-100%); opacity: 1; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="container mx-auto p-4">
+        <h1 class="text-3xl font-bold mb-4 text-center text-indigo-300">Interactive Map of Indigenous Groups</h1>
+        <h1 class="text-3xl font-bold mb-4 text-center text-indigo-300">and their Challenges</h1>
+        <div class="flex justify-between mb-4">
+            <div class="theme-toggle">
+                <label for="theme">Map Theme: </label>
+                <select id="theme" class="p-2 rounded bg-gray-800 text-white">
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                    <option value="satellite">Satellite</option>
+                </select>
+            </div>
+            <div class="search-bar">
+                <input id="search" type="text" placeholder="Search by group or country..." class="p-2 rounded bg-gray-800 text-white w-64">
+            </div>
+        </div>
+        <div id="map" class="rounded-lg shadow-lg"></div>
+        <div class="mt-4 text-left text-lg">
+            <p class="font-semibold text-indigo-300">Bermas Aderik P.</p>
+            <p class="text-gray-400">BSIT 2B</p>
+        </div>
+    </div>
+    <div id="sidebar" class="sidebar">
+      <button id="close-sidebar" class="text-red-500 text-2xl font-bold mb-4" title="Close">&times;</button>
+      <button id="slide-out-sidebar" class="text-blue-500 text-2xl font-bold mb-4 ml-2" title="Slide Out">→</button>
+      <h2 id="sidebar-title" class="text-xl font-bold mb-2"></h2>
+        <p id="sidebar-content" class="text-gray-600"></p>
+    </div>
+    <script>
+        // Initialize the map
+        const map = L.map('map').setView([0, 0], 4);
+
+        // Map themes
+        const themes = {
+            light: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }),
+            dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '© <a href="https://carto.com/attributions">CARTO</a>'
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '© <a href="https://www.esri.com/">Esri</a>'
+            })
+        };
+
+        // Set default theme
+        themes.light.addTo(map);
+
+        // Theme toggle
+        document.getElementById('theme').addEventListener('change', (e) => {
+            Object.values(themes).forEach(layer => map.removeLayer(layer));
+            themes[e.target.value].addTo(map);
+        });
+
+        // Data for indigenous groups
+        const indigenousGroups = [
+            {
+                name: "Igorot",
+                country: "Philippines",
+                lat: 16.9742,
+                lng: 120.8856,
+                challenges: "Land rights disputes, environmental degradation from mining, and integration into digital education systems.",
+                details: "The Igorot, residing in the Cordillera region, face ongoing land disputes due to mining operations that threaten their ancestral domains. With a population of approximately 1.5 million, they maintain vibrant cultural practices like the cañao ritual but struggle with access to modern education and healthcare. Climate change exacerbates soil erosion in their mountainous lands.",
+                imageUrl: "igorot.jpg"
+            },
+            {
+                name: "Lumad",
+                country: "Philippines",
+                lat: 7.1907,
+                lng: 125.4553,
+                challenges: "Displacement from renewable energy projects, ongoing militarization, and cultural preservation challenges.",
+                details: "The Lumad, comprising 18 ethnolinguistic groups in Mindanao, number around 2 million. They face displacement from large-scale renewable energy projects and militarization, which disrupt their traditional swidden farming. Efforts to preserve their oral traditions and languages are challenged by limited access to digital platforms.",
+                imageUrl: "lumad.jpg"
+            },
+            {
+                name: "Aeta",
+                country: "Philippines",
+                lat: 15.2167,
+                lng: 120.8583,
+                challenges: "Climate change adaptation, urban encroachment, and limited access to renewable energy.",
+                details: "The Aeta, with a population of about 50,000, are among the Philippines' earliest inhabitants. Their nomadic lifestyle is threatened by urban expansion and climate-driven natural disasters like typhoons. They rely on traditional hunting but lack access to renewable energy sources, hindering community development.",
+                imageUrl: "aeta.jpg"
+            },
+            {
+                name: "Dayak",
+                country: "Indonesia",
+                lat: -0.8917,
+                lng: 114.2876,
+                challenges: "Deforestation from palm oil expansion, climate change impacts, and digital exclusion.",
+                details: "The Dayak, with over 3 million people across Borneo, face deforestation from palm oil plantations, reducing their forest-based livelihoods. Their intricate beadwork and longhouse traditions are at risk, and digital exclusion limits their advocacy efforts. Climate change increases flooding in their riverine communities.",
+                imageUrl: "dayak.jpg"
+            },
+            {
+                name: "Aboriginal Australians",
+                country: "Australia",
+                lat: -25.2744,
+                lng: 133.7751,
+                challenges: "Climate-driven wildfires, cultural heritage destruction, and digital literacy gaps.",
+                details: "Aboriginal Australians, numbering about 800,000, maintain the world’s oldest continuous cultures, with Dreamtime stories central to their identity. Climate-driven wildfires destroy sacred sites, and digital literacy gaps limit access to online education. Land rights struggles persist despite legal recognition efforts.",
+                imageUrl: "aboriginal.jpg"
+            },
+            {
+                name: "Maori",
+                country: "New Zealand",
+                lat: -41.2865,
+                lng: 174.7762,
+                challenges: "Climate change affecting traditional fishing, socioeconomic gaps, and digital inclusion efforts.",
+                details: "The Maori, approximately 900,000 strong, uphold traditions like the haka and marae gatherings. Climate change disrupts their fishing grounds, critical to their diet and economy. Socioeconomic disparities persist, with efforts to integrate Maori youth into digital economies ongoing but challenging.",
+                imageUrl: "maori.jpg"
+            },
+            {
+                name: "Yanomami",
+                country: "Brazil",
+                lat: 2.8198,
+                lng: -63.1747,
+                challenges: "Illegal mining surge, Amazon deforestation, and health crises from pollution.",
+                details: "The Yanomami, with about 38,000 people, live in the Amazon across Brazil and Venezuela. Illegal gold mining brings mercury pollution, causing health crises like malnutrition and disease. Deforestation threatens their shamanic traditions and forest-based livelihoods, with little government protection.",
+                imageUrl: "yanomami.jpg"
+            },
+            {
+                name: "Inuit",
+                country: "Canada",
+                lat: 64.1353,
+                lng: -94.7071,
+                challenges: "Arctic ice melt, food insecurity from disrupted hunting, and renewable energy access.",
+                details: "The Inuit, numbering around 70,000 in Canada, rely on hunting seals and whales, disrupted by Arctic ice melt due to climate change. Their igloo-building and storytelling traditions face erosion, and remote communities lack reliable renewable energy, impacting modern infrastructure development.",
+                imageUrl: "inuit.jpg"
+            },
+            {
+                name: "Santhals",
+                country: "India",
+                lat: 24.5263,
+                lng: 87.8498,
+                challenges: "Land grabs for industrial projects, climate-driven migration, and digital education barriers.",
+                details: "The Santhals, one of India’s largest tribal groups with over 7 million people, face land alienation from mining and industrial projects. Their traditional festivals like Sohrai are vital to their identity, but climate-driven migration disrupts community cohesion. Digital education access remains limited, hindering youth opportunities.",
+                imageUrl: "santhals.jpg"
+            },
+            {
+                name: "Mapuche",
+                country: "Chile",
+                lat: -38.7397,
+                lng: -72.5984,
+                challenges: "Land conflicts with forestry companies, cultural assimilation pressures, and climate change impacts.",
+                details: "The Mapuche, numbering about 1.7 million, primarily live in Chile’s Araucanía region. Known for their resistance against Spanish and Chilean colonization, they face ongoing land disputes with forestry companies. Their weavings and spiritual practices tied to the land are threatened by cultural assimilation and climate-driven droughts.",
+                imageUrl: "mapuche.jpg"
+            },
+            {
+                name: "Hadza",
+                country: "Tanzania",
+                lat: -3.8333,
+                lng: 35.1333,
+                challenges: "Land loss to tourism and agriculture, cultural erosion, and lack of legal recognition.",
+                details: "The Hadza, a small group of about 1,000–1,500, live around Lake Eyasi in Tanzania. As one of Africa’s last hunter-gatherer communities, they face land encroachment from tourism and agriculture. Their click-based language and foraging traditions are at risk, with minimal legal protections for their territorial rights.",
+                imageUrl: "hadza.jpg"
+            },
+            {
+                name: "Métis",
+                country: "Canada",
+                lat: 53.9333,
+                lng: -116.5765,
+                challenges: "Lack of land base, socioeconomic disparities, and cultural recognition challenges.",
+                details: "The Métis, with around 600,000 people, are a distinct Indigenous group in Canada with mixed European and Indigenous ancestry. Known for their Red River carts and unique Michif language, they lack a formal land base, complicating self-governance. Socioeconomic gaps and efforts for cultural recognition persist.",
+                imageUrl: "metis.jpg"
+            },
+            {
+                name: "Sámi",
+                country: "Norway",
+                lat: 68.9043,
+                lng: 23.0408,
+                challenges: "Climate change affecting reindeer herding, land rights disputes, and cultural preservation.",
+                details: "The Sámi, numbering 80,000–100,000 across Norway, Sweden, Finland, and Russia, are Europe’s only recognized Indigenous peoples in the EU. Their reindeer herding and joik singing traditions face threats from climate change and mining. Land rights disputes with governments challenge their cultural survival.",
+                imageUrl: "sami.jpg"
+            },
+            {
+                name: "Guaraní",
+                country: "Paraguay",
+                lat: -23.4425,
+                lng: -58.4438,
+                challenges: "Deforestation for agriculture, land rights violations, and loss of traditional knowledge.",
+                details: "The Guaraní, with about 250,000 people across Paraguay, Brazil, Argentina, and Bolivia, are known for their bilingual culture and traditional yerba mate practices. Deforestation for soy plantations and land grabs threaten their territories. Efforts to preserve their language and knowledge face challenges from modernization.",
+                imageUrl: "guarani.jpg"
+            },
+            {
+                name: "Maasai",
+                country: "Kenya",
+                lat: -1.0833,
+                lng: 35.8667,
+                challenges: "Land loss due to conservation projects, climate change affecting grazing, and cultural assimilation.",
+                details: "The Maasai, a semi-nomadic people with approximately 1 million in Kenya and Tanzania, are known for their pastoralist lifestyle and vibrant ceremonies. They face land loss from wildlife conservation efforts and climate change, which reduces grazing lands. Modernization and education access remain challenges to their traditional way of life.",
+                imageUrl: "maasai.jpg"
+            },
+            {
+                name: "San (Bushmen)",
+                country: "South Africa",
+                lat: -28.4500,
+                lng: 21.2500,
+                challenges: "Displacement from ancestral lands, cultural erosion, and limited legal recognition.",
+                details: "The San, or Bushmen, with a population of about 100,000 across Southern Africa, are among the oldest hunter-gatherer communities. They face displacement due to land development in the Kalahari and loss of their traditional knowledge, with ongoing struggles for legal recognition and cultural preservation.",
+                imageUrl: "san.jpg"
+            },
+            {
+                name: "Sidama",
+                country: "Ethiopia",
+                lat: 7.0500,
+                lng: 38.4833,
+                challenges: "Land disputes with government, modernization pressures, and climate change impacts on agriculture.",
+                details: "The Sidama, numbering around 3 million in southern Ethiopia, are known for their coffee farming and rich cultural heritage. They face land disputes with the Ethiopian government and modernization pressures that threaten their traditional practices, with climate change affecting their agricultural yields.",
+                imageUrl: "sidama.jpg"
+            }
+        ];
+
+        // Track the active marker
+        let activeMarker = null;
+
+        // Create layer groups for each country
+        const countryLayers = {};
+        indigenousGroups.forEach(group => {
+            if (!countryLayers[group.country]) {
+                countryLayers[group.country] = L.layerGroup();
+            }
+            const marker = L.marker([group.lat, group.lng], {
+                icon: L.icon({
+                    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                    iconSize: [25, 41],
+                    iconAnchor: [12, 41],
+                    popupAnchor: [0, -41], // Center popup above marker
+                    className: 'marker'
+                })
+            }).bindPopup(`
+                <div class="popup-card">
+                    <h3 class="font-bold">${group.name} (${group.country})</h3>
+                    <p class="text-sm text-gray-600">${group.challenges}</p>
+                    <img src="${group.imageUrl}" class="popup-image" alt="${group.name} image">
+                </div>
+            `, {
+                autoPan: true, // Ensure popup stays centered
+                keepInView: true
+            }).on('click', () => {
+                activeMarker = marker; // Set active marker
+                // Zoom and center map with animation
+                map.flyTo([group.lat, group.lng], 10, { duration: 1 });
+                // Add bounce animation to marker
+                marker.getElement().classList.add('bounce');
+                setTimeout(() => marker.getElement().classList.remove('bounce'), 500);
+                // Open sidebar
+                document.getElementById('sidebar-title').textContent = `${group.name} (${group.country})`;
+                document.getElementById('sidebar-content').textContent = group.details;
+                document.getElementById('sidebar').classList.add('open');
+            });
+            marker.addTo(countryLayers[group.country]);
+        });
+
+        // Add all layers to the map initially
+        Object.values(countryLayers).forEach(layer => layer.addTo(map));
+
+        // Create a control for filtering by country
+        const overlayMaps = {};
+        Object.keys(countryLayers).forEach(country => {
+            overlayMaps[country] = countryLayers[country];
+        });
+
+        L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
+
+        // Fit map to bounds of all markers
+        const group = new L.featureGroup(Object.values(countryLayers).flatMap(layer => layer.getLayers()));
+        map.fitBounds(group.getBounds().pad(0.1));
+
+        // Search functionality
+        document.getElementById('search').addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            Object.values(countryLayers).forEach(layer => map.removeLayer(layer));
+            indigenousGroups.forEach(group => {
+                if (group.name.toLowerCase().includes(query) || group.country.toLowerCase().includes(query)) {
+                    countryLayers[group.country].addTo(map);
+                }
+            });
+        });
+     
+// Partial close - just slide sidebar partially off-screen
+document.getElementById('slide-out-sidebar').addEventListener('click', () => {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.remove('open');
+    sidebar.classList.add('partial-closed');
+
+    // Do NOT close popup or reset activeMarker
+});
+
+        // Sidebar close button
+       document.addEventListener('DOMContentLoaded', function () {
+    // Sidebar close button
+    const closeBtn = document.getElementById('close-sidebar');
+    const sidebar = document.getElementById('sidebar');
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            sidebar.classList.remove('open');
+            sidebar.classList.remove('partial-closed');
+            if (activeMarker) {
+                activeMarker.closePopup();
+                activeMarker = null;
+            }
+        });
+    } else {
+        console.warn("Close button not found!");
+    }
+});
+
+        // Close sidebar when popup is closed
+        map.on('popupclose', () => {
+            document.getElementById('sidebar').classList.remove('open');
+            activeMarker = null; // Reset active marker
+        });
+    </script>
+</body>
+</html>
